@@ -19,10 +19,10 @@ public class BValueTests
 
     [Theory]
     [InlineData("4spam")]
-    public void StringParsingFails_WhenMissingColon(string expectedRaw)
+    public void StringParsingFails_WhenMissingColon(string expected)
     {
-        var expected = StringAsStream(expectedRaw);
-        var error = BValue.Parse(expected).AsT1;
+        var expectedEncoded = StringAsStream(expected);
+        var error = BValue.Parse(expectedEncoded).AsT1;
 
         error.Value.ShouldBeOfType<InvalidFormat>();
     }
@@ -108,12 +108,12 @@ public class BValueTests
     [Theory]
     [InlineData("plide")]
     [InlineData("norde")]
-    public void ParsingFails_WhenInvalidPrefixChar(string expectedRaw)
+    public void ParsingFails_WhenInvalidPrefixChar(string expected)
     {
-        var expected = StringAsStream(expectedRaw);
-        var error = BValue.Parse(expected).AsT1;
+        var expectedEncoded = StringAsStream(expected);
+        var error = BValue.Parse(expectedEncoded).AsT1;
 
-        error.Value.ShouldBeOfType<InvalidPrefixChar>();
+        error.Value.ShouldBeOfType<InvalidFormat>();
     }
 
     [Theory]
@@ -121,14 +121,13 @@ public class BValueTests
     [InlineData("l3:370")]
     [InlineData("d1:a0:")]
     [InlineData("d1:xli0ee")]
-    public void ParsingFails_WhenUnclosedPrefix(string expectedRaw)
+    public void ParsingFails_WhenUnclosedPrefix(string expected)
     {
-        var expected = StringAsStream(expectedRaw);
-        var error = BValue.Parse(expected).AsT1;
+        var expectedEncoded = StringAsStream(expected);
+        var error = BValue.Parse(expectedEncoded).AsT1;
 
         error.Value.ShouldBeOfType<InvalidFormat>();
     }
 
     static MemoryStream StringAsStream(string msg) => new(System.Text.Encoding.UTF8.GetBytes(msg));
 }
-

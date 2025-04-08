@@ -3,6 +3,7 @@
 using System.Collections;
 using System.Globalization;
 using System.Numerics;
+using System.Text;
 using OneOf;
 
 namespace Attractor;
@@ -13,10 +14,12 @@ namespace Attractor;
 [GenerateOneOf]
 public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionnary>
 {
-    // TODO(Unavailable): async methods
+    // TODO(Unavailable): async methods.
 
     // TODO(Unavailable): Simplify unclosed prefix reading to avoid
     // `if (peek/read != 'e')`.
+
+    // TODO(Unavailable): As{BString, BigInteger, BList, BDictionnary} conversions.
 
     // DOCS(Unavailable): Encourage to buffer the stream to optimize performance.
 
@@ -28,20 +31,20 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionnary
     /// <summary>
     /// Parses a <see cref="BValue"/> from the <paramref name="stream"/>.
     /// </summary>
-    public static OneOf<BValue, Error> Parse(Stream stream)
+    public static OneOf<BValue, ParsingError> Parse(Stream stream)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        BinaryReader reader = new(stream);
 
+        using BinaryReader reader = new(stream, Encoding.UTF8, true);
         return Parse(reader);
     }
 
-    private static OneOf<BValue, Error> Parse(BinaryReader reader)
+    private static OneOf<BValue, ParsingError> Parse(BinaryReader reader)
     {
         int value;
         if ((value = reader.Read()) == -1)
         {
-            return Error.UnexpectedEof;
+            return ParsingError.UnexpectedEof;
         }
 
         return (char)value switch
@@ -50,28 +53,28 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionnary
             'i' => ParseBigInteger(reader),
             'l' => ParseList(reader),
             'd' => ParseDictionnary(reader),
-            _ => Error.InvalidPrefixChar,
+            _ => ParsingError.InvalidFormat,
         };
     }
 
-    private static OneOf<BValue, Error> ParseString(int length, BinaryReader reader)
+    private static OneOf<BValue, ParsingError> ParseString(int length, BinaryReader reader)
     {
         if (reader.Read() != ':')
         {
-            return Error.InvalidFormat;
+            return ParsingError.InvalidFormat;
         }
 
         byte[] bytes = reader.ReadBytes(length);
 
         if (bytes.Length != length)
         {
-            return Error.UnexpectedEof;
+            return ParsingError.UnexpectedEof;
         }
 
         return new BValue(new BString(bytes));
     }
 
-    private static OneOf<BValue, Error> ParseBigInteger(BinaryReader reader)
+    private static OneOf<BValue, ParsingError> ParseBigInteger(BinaryReader reader)
     {
         // most numbers are small
         List<char> chars = new(10);
@@ -102,7 +105,7 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionnary
             || read != 'e'
         )
         {
-            return Error.InvalidFormat;
+            return ParsingError.InvalidFormat;
         }
 
         NumberStyles style = NumberStyles.AllowLeadingSign;
@@ -110,10 +113,10 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionnary
 
         return BigInteger.TryParse(chars.ToArray(), style, provider, out var bint)
             ? new BValue(bint)
-            : Error.InvalidFormat;
+            : ParsingError.InvalidFormat;
     }
 
-    private static OneOf<BValue, Error> ParseList(BinaryReader reader)
+    private static OneOf<BValue, ParsingError> ParseList(BinaryReader reader)
     {
         List<BValue> result = [];
 
@@ -138,13 +141,13 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionnary
 
         if (peek != 'e')
         {
-            return Error.InvalidFormat;
+            return ParsingError.InvalidFormat;
         }
 
         return new BValue(new BList(result));
     }
 
-    private static OneOf<BValue, Error> ParseDictionnary(BinaryReader reader)
+    private static OneOf<BValue, ParsingError> ParseDictionnary(BinaryReader reader)
     {
         SortedDictionary<BString, BValue> result = [];
 
@@ -157,6 +160,8 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionnary
                 break;
             }
 
+            // FIXME(Unvailable): key ordering is indeed required while parsing.
+
             // FIXME(Unvailable): This is _very_ bad, because we only need to
             // check if string parsing works.
             if (Parse(reader).TryPickT1(out var keyError, out var key))
@@ -166,7 +171,7 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionnary
 
             if (!key.TryPickT0(out var keyString, out var _))
             {
-                return Error.InvalidFormat;
+                return ParsingError.InvalidFormat;
             }
 
             if (Parse(reader).TryPickT0(out var value, out var valueError))
@@ -181,7 +186,7 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionnary
 
         if (peek != 'e')
         {
-            return Error.InvalidFormat;
+            return ParsingError.InvalidFormat;
         }
 
         return new BValue(new BDictionnary(result));
@@ -248,20 +253,17 @@ public record BDictionnary(SortedDictionary<BString, BValue> Values)
 
 // errors
 
+// FIXME(Unavailable): Add `IOException` as one of the cases.
 [GenerateOneOf]
-public partial class Error : OneOfBase<InvalidPrefixChar, InvalidFormat, UnexpectedEof>
+public partial class ParsingError : OneOfBase<InvalidFormat, UnexpectedEof>
 {
-    // TODO(Unavailable): Move into `InvalidFormat`.
-    internal static readonly Error InvalidPrefixChar = new InvalidPrefixChar();
-    internal static readonly Error InvalidFormat = new InvalidFormat();
-    internal static readonly Error UnexpectedEof = new UnexpectedEof();
+    internal static readonly ParsingError InvalidFormat = new InvalidFormat();
+    internal static readonly ParsingError UnexpectedEof = new UnexpectedEof();
 }
-
-// TODO(Unavailable): Char property
-public readonly record struct InvalidPrefixChar();
 
 // TODO(Unvailable): Message property reasons:
 //
+// - Invalid prefix char
 // - Missing colon for string parsing
 // - -0
 // - Leading zeros
@@ -269,7 +271,7 @@ public readonly record struct InvalidPrefixChar();
 // - Expected string for dictionary key
 // - Missing value for dictionary
 //
-// (don't forget to write tests for each variant once the are added :))
+// (don't forget to write tests for each variant once they are added :))
 public readonly record struct InvalidFormat();
 
 public readonly record struct UnexpectedEof();
