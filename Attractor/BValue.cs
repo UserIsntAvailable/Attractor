@@ -6,6 +6,9 @@ using System.Numerics;
 using System.Text;
 using OneOf;
 
+// TODO(Unavailable): Is there a way to do this from the `.csproj` file.
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Attractor.Tests")]
+
 namespace Attractor;
 
 /// <summary>
@@ -19,7 +22,7 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionnary
     // TODO(Unavailable): Simplify unclosed prefix reading to avoid
     // `if (peek/read != 'e')`.
 
-    // TODO(Unavailable): As{BString, BigInteger, BList, BDictionnary} conversions.
+    // TODO(Unavailable): As/TryPick{BString, BigInteger, BList, BDictionnary} conversions.
 
     // DOCS(Unavailable): Encourage to buffer the stream to optimize performance.
 
@@ -53,7 +56,7 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionnary
             'i' => ParseBigInteger(reader),
             'l' => ParseList(reader),
             'd' => ParseDictionnary(reader),
-            _ => ParsingError.InvalidFormat,
+            _ => InvalidFormatError.InvalidPrefixChar((char)value),
         };
     }
 
@@ -61,7 +64,7 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionnary
     {
         if (reader.Read() != ':')
         {
-            return ParsingError.InvalidFormat;
+            return InvalidFormatError.MissingColon;
         }
 
         byte[] bytes = reader.ReadBytes(length);
@@ -89,31 +92,32 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionnary
             chars.Add((char)read);
         }
 
-        // invalid operations:
-        if (
-            (
-                chars
-                is
-                    // `ie`
-                    []
-                    // leading zeros
-                    or ['0', _, ..]
-                    // -0
-                    or ['-', '0', ..]
-            )
-            // unclosed prefix
-            || read != 'e'
-        )
+        if (read != 'e')
         {
-            return ParsingError.InvalidFormat;
+            return InvalidFormatError.UnclosedPrefix('i');
+        }
+        switch (chars)
+        {
+            case []:
+                return InvalidFormatError.EmptyInteger;
+            case ['0', _, ..]:
+                return InvalidFormatError.LeadingZeros;
+            // FIXME(Unavailable): Both `LeadingZeros` and `MinusZero` should be returned with
+            // `-00`.
+            case ['-', '0', ..]:
+                return InvalidFormatError.MinusZero;
         }
 
-        NumberStyles style = NumberStyles.AllowLeadingSign;
-        NumberFormatInfo provider = new() { PositiveSign = "" };
-
-        return BigInteger.TryParse(chars.ToArray(), style, provider, out var bint)
-            ? new BValue(bint)
-            : ParsingError.InvalidFormat;
+        try
+        {
+            NumberStyles style = NumberStyles.AllowLeadingSign;
+            NumberFormatInfo provider = new() { PositiveSign = "" };
+            return new BValue(BigInteger.Parse(chars.ToArray(), style, provider));
+        }
+        catch (FormatException ex)
+        {
+            return InvalidFormatError.Custom("Invalid integer format", ex);
+        }
     }
 
     private static OneOf<BValue, ParsingError> ParseList(BinaryReader reader)
@@ -141,7 +145,7 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionnary
 
         if (peek != 'e')
         {
-            return ParsingError.InvalidFormat;
+            return InvalidFormatError.UnclosedPrefix('l');
         }
 
         return new BValue(new BList(result));
@@ -160,9 +164,9 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionnary
                 break;
             }
 
-            // FIXME(Unvailable): key ordering is indeed required while parsing.
+            // FIXME(Unavailable): key ordering is indeed required while parsing.
 
-            // FIXME(Unvailable): This is _very_ bad, because we only need to
+            // FIXME(Unavailable): This is _very_ bad, because we only need to
             // check if string parsing works.
             if (Parse(reader).TryPickT1(out var keyError, out var key))
             {
@@ -171,7 +175,7 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionnary
 
             if (!key.TryPickT0(out var keyString, out var _))
             {
-                return ParsingError.InvalidFormat;
+                return InvalidFormatError.KeyIsNotString;
             }
 
             if (Parse(reader).TryPickT0(out var value, out var valueError))
@@ -180,13 +184,18 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionnary
             }
             else
             {
-                return valueError;
+                return
+                    valueError.TryPickT1(out var formatError, out var _)
+                    // TODO(Unavailable): InvalidFormatError.Equals() override
+                    && formatError.Message == InvalidFormatError.InvalidPrefixChar('e').AsT1.Message
+                    ? InvalidFormatError.MissingDictionnaryValue(keyString.AsString())
+                    : valueError;
             }
         }
 
         if (peek != 'e')
         {
-            return ParsingError.InvalidFormat;
+            return InvalidFormatError.UnclosedPrefix('d');
         }
 
         return new BValue(new BDictionnary(result));
@@ -199,7 +208,7 @@ public record BString(byte[] Bytes) : IComparable<BString>
 {
     public string AsString()
     {
-        return System.Text.Encoding.UTF8.GetString([.. Bytes]);
+        return Encoding.UTF8.GetString([.. Bytes]);
     }
 
     public virtual bool Equals(BString? other)
@@ -240,6 +249,10 @@ public record BDictionnary(SortedDictionary<BString, BValue> Values)
         return other != null && Values.SequenceEqual(other.Values);
     }
 
+    public BValue? this[BString key] => Values.TryGetValue(key, out var value) ? null : value;
+
+    public BValue? this[string key] => Values[new BString(Encoding.UTF8.GetBytes(key))];
+
     public IEnumerator<KeyValuePair<BString, BValue>> GetEnumerator()
     {
         return Values.GetEnumerator();
@@ -255,23 +268,80 @@ public record BDictionnary(SortedDictionary<BString, BValue> Values)
 
 // FIXME(Unavailable): Add `IOException` as one of the cases.
 [GenerateOneOf]
-public partial class ParsingError : OneOfBase<InvalidFormat, UnexpectedEof>
+public partial class ParsingError : OneOfBase<UnexpectedEofError, InvalidFormatError>
 {
-    internal static readonly ParsingError InvalidFormat = new InvalidFormat();
-    internal static readonly ParsingError UnexpectedEof = new UnexpectedEof();
+    // internal static readonly ParsingError InvalidFormat = new InvalidFormatError("");
+    // FIXME(Unavailable): Reuse `EndOfStreamException`.
+    internal static readonly ParsingError UnexpectedEof = new UnexpectedEofError();
 }
 
-// TODO(Unvailable): Message property reasons:
-//
-// - Invalid prefix char
-// - Missing colon for string parsing
-// - -0
-// - Leading zeros
-// - Unclosed i,l,d prefixes
-// - Expected string for dictionary key
-// - Missing value for dictionary
-//
-// (don't forget to write tests for each variant once they are added :))
-public readonly record struct InvalidFormat();
+public readonly record struct UnexpectedEofError;
 
-public readonly record struct UnexpectedEof();
+// TODO(Unavailable): Should I reuse `FormatException`, and move the helper
+// constructors into `ParsingError`?
+//
+// TODO(Unavailable): Implement `IEquatable<T>`.
+//
+// Remember to refactor the `error.Message.ShouldBe(...)` mess on `BValueTests`.
+public class InvalidFormatError : Exception
+{
+    private InvalidFormatError(string? message)
+        : base(message)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(message);
+    }
+
+    private InvalidFormatError(string? message, Exception? innerException)
+        : base(message, innerException)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(message);
+    }
+
+    // NOTE: Please ignore the order of these. They are supposed to be ordered
+    // by how they appear on this file.
+
+    internal static ParsingError InvalidPrefixChar(char prefix)
+    {
+        return new ParsingError(new InvalidFormatError($"Invalid prefix character '{prefix}'."));
+    }
+
+    internal static readonly ParsingError MissingColon = new InvalidFormatError(
+        "Missing ':' separator for string prefix."
+    );
+
+    internal static readonly ParsingError EmptyInteger = new InvalidFormatError(
+        "Empty integers (ie) are not valid."
+    );
+
+    internal static readonly ParsingError LeadingZeros = new InvalidFormatError(
+        "Leading zeros (01) are not allowed on integers."
+    );
+
+    internal static readonly ParsingError MinusZero = new InvalidFormatError(
+        "'-0' is not a valid integer value."
+    );
+
+    internal static ParsingError UnclosedPrefix(char prefix)
+    {
+        return new InvalidFormatError($"The prefix '{prefix}' wasn't closed with 'e'.");
+    }
+
+    internal static readonly ParsingError KeyIsNotString = new InvalidFormatError(
+        "Dictionary's keys can only be strings."
+    );
+
+    internal static ParsingError MissingDictionnaryValue(string key)
+    {
+        return new InvalidFormatError($"The dictionnary key '{key}' is missing a value.");
+    }
+
+    internal static ParsingError Custom(string message)
+    {
+        return new InvalidFormatError(message);
+    }
+
+    internal static ParsingError Custom(string message, Exception exception)
+    {
+        return new InvalidFormatError(message, exception);
+    }
+}

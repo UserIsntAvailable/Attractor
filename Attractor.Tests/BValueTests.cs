@@ -17,14 +17,13 @@ public class BValueTests
         actual.ShouldBeEquivalentTo(expected);
     }
 
-    [Theory]
-    [InlineData("4spam")]
-    public void StringParsingFails_WhenMissingColon(string expected)
+    [Fact]
+    public void StringParsingFails_WhenMissingColon()
     {
-        var expectedEncoded = StringAsStream(expected);
+        var expectedEncoded = StringAsStream("4spam");
         var error = BValue.Parse(expectedEncoded).AsT1;
 
-        error.Value.ShouldBeOfType<InvalidFormat>();
+        error.ShouldBeEquivalentTo(InvalidFormatError.MissingColon);
     }
 
     [Theory]
@@ -39,22 +38,47 @@ public class BValueTests
         actual.ShouldBeEquivalentTo(expected);
     }
 
+    [Fact]
+    public void IntegerParsingFails_WhenEmptyInteger()
+    {
+        var expectedEncoded = StringAsStream("ie");
+        var error = BValue.Parse(expectedEncoded).AsT1;
+
+        error.ShouldBeEquivalentTo(InvalidFormatError.EmptyInteger);
+    }
+
     [Theory]
-    [InlineData("")]
-    [InlineData("-0")]
-    [InlineData("-00")]
+    [InlineData("01")]
+    // TODO(Unavailable): These probably should return `InvalidFormatError.Custom`.
     [InlineData("0-0")]
-    [InlineData("(0)")]
-    [InlineData(" 0 ")]
-    [InlineData("010")]
-    [InlineData("+10")]
     [InlineData("0xA")]
-    public void IntegerParsingFails(string expected)
+    public void IntegerParsingFails_LeadingZero(string expected)
     {
         var expectedEncoded = StringAsStream($"i{expected}e");
         var error = BValue.Parse(expectedEncoded).AsT1;
 
-        error.Value.ShouldBeOfType<InvalidFormat>();
+        error.ShouldBeEquivalentTo(InvalidFormatError.LeadingZeros);
+    }
+
+    [Fact]
+    public void IntegerParsingFails_WhenMinusZero()
+    {
+        var expectedEncoded = StringAsStream("i-0e");
+        var error = BValue.Parse(expectedEncoded).AsT1;
+
+        error.ShouldBeEquivalentTo(InvalidFormatError.MinusZero);
+    }
+
+    [Theory]
+    [InlineData("(0)")]
+    [InlineData(" 0 ")]
+    [InlineData("+10")]
+    public void IntegerParsingFails_WhenInvalidInteger(string expected)
+    {
+        var expectedEncoded = StringAsStream($"i{expected}e");
+        var error = BValue.Parse(expectedEncoded).AsT1.AsT1;
+
+        error.Message.ShouldContain("Invalid integer format");
     }
 
     [Theory]
@@ -82,7 +106,7 @@ public class BValueTests
         var expected = expectedList
             .Chunk(2)
             .Select(
-                (x) =>
+                static (x) =>
                 {
                     if (x is [var key, var value])
                     {
@@ -97,7 +121,7 @@ public class BValueTests
         var expectedEncoded = StringAsStream($"d{expectedJoin}e");
         var actual = BValue.Parse(expectedEncoded).AsT0.AsT3;
 
-        // UPSTREAM(Unvailable): Why `ShouldBe` isn't implemented for
+        // UPSTREAM(Unavailable): Why `ShouldBe` isn't implemented for
         // `IEnumerable<KeyValuePair<_, _>>`?
         foreach (var (key, value) in expected)
         {
@@ -106,14 +130,36 @@ public class BValueTests
     }
 
     [Theory]
-    [InlineData("plide")]
-    [InlineData("norde")]
-    public void ParsingFails_WhenInvalidPrefixChar(string expected)
+    [InlineData("di0e4:spame")]
+    [InlineData("dle2:me")]
+    [InlineData("dd0:leei5ee")]
+    public void DictionnaryParsingFails_WhenKeyIsNotString(string expected)
     {
         var expectedEncoded = StringAsStream(expected);
         var error = BValue.Parse(expectedEncoded).AsT1;
 
-        error.Value.ShouldBeOfType<InvalidFormat>();
+        error.ShouldBeEquivalentTo(InvalidFormatError.KeyIsNotString);
+    }
+
+    [Fact]
+    public void DictionnaryParsingFails_WhenMissingDictionnaryValue()
+    {
+        var expectedEncoded = StringAsStream("d0:e");
+        var error = BValue.Parse(expectedEncoded).AsT1.AsT1;
+
+        error.Message.ShouldBe(InvalidFormatError.MissingDictionnaryValue("").AsT1.Message);
+    }
+
+    [Theory]
+    [InlineData("plide")]
+    [InlineData("norde")]
+    public void ParsingFails_WhenInvalidPrefixChar(string expected)
+    {
+        var expectedPrefix = expected.First();
+        var expectedEncoded = StringAsStream(expected);
+        var error = BValue.Parse(expectedEncoded).AsT1.AsT1;
+
+        error.Message.ShouldBe(InvalidFormatError.InvalidPrefixChar(expectedPrefix).AsT1.Message);
     }
 
     [Theory]
@@ -123,10 +169,11 @@ public class BValueTests
     [InlineData("d1:xli0ee")]
     public void ParsingFails_WhenUnclosedPrefix(string expected)
     {
+        var expectedPrefix = expected.First();
         var expectedEncoded = StringAsStream(expected);
-        var error = BValue.Parse(expectedEncoded).AsT1;
+        var error = BValue.Parse(expectedEncoded).AsT1.AsT1;
 
-        error.Value.ShouldBeOfType<InvalidFormat>();
+        error.Message.ShouldBe(InvalidFormatError.UnclosedPrefix(expectedPrefix).AsT1.Message);
     }
 
     static MemoryStream StringAsStream(string msg) => new(System.Text.Encoding.UTF8.GetBytes(msg));
