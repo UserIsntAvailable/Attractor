@@ -268,7 +268,7 @@ public record BDictionary(SortedDictionary<BString, BValue> Values)
         return other != null && Values.SequenceEqual(other.Values);
     }
 
-    public BValue? this[BString key] => Values.TryGetValue(key, out var value) ? null : value;
+    public BValue? this[BString key] => Values.TryGetValue(key, out var value) ? value : null;
 
     public BValue? this[string key] => this[new BString(Encoding.UTF8.GetBytes(key))];
 
@@ -289,7 +289,6 @@ public record BDictionary(SortedDictionary<BString, BValue> Values)
 [GenerateOneOf]
 public partial class ParsingError : OneOfBase<UnexpectedEofError, InvalidFormatError>
 {
-    // internal static readonly ParsingError InvalidFormat = new InvalidFormatError("");
     // FIXME(Unavailable): Reuse `EndOfStreamException`.
     internal static readonly ParsingError UnexpectedEof = new UnexpectedEofError();
 }
@@ -351,7 +350,7 @@ public class InvalidFormatError : Exception
 
     internal static ParsingError MissingDictionaryValues(string key)
     {
-        return new InvalidFormatError($"The dictionnary key '{key}' is missing a value.");
+        return new InvalidFormatError($"The dictionary key '{key}' is missing a value.");
     }
 
     internal static ParsingError Custom(string message)
