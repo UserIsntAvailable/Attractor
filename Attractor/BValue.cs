@@ -29,7 +29,7 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
     // FIXME(Unavailable): The `Stream` needs to support seeking (which is fixed
     // by using a BufferedStream, I think).
 
-    // FIXME(Unavailable): Catch all exceptions as `UnexpectedEof`.
+    // FIXME(Unavailable): Properly try/catch exceptions.
 
     /// <summary>
     /// Parses a <see cref="BValue"/> from the <paramref name="stream"/>.
@@ -47,7 +47,7 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
         int value;
         if ((value = reader.Read()) == -1)
         {
-            return ParsingError.UnexpectedEof;
+            return ParsingError.EndOfStream;
         }
 
         var prefix = (char)value;
@@ -57,7 +57,7 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
             'i' => ParseBigInteger(reader),
             'l' => ParseList(reader),
             'd' => ParseDictionary(reader),
-            _ => InvalidFormatError.InvalidPrefixChar((char)value),
+            _ => ParsingError.InvalidPrefixChar((char)value),
         };
     }
 
@@ -77,20 +77,18 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
 
         if (read != ':')
         {
-            return InvalidFormatError.MissingColon;
+            return ParsingError.MissingColon;
         }
 
         // FIXME(Unavailable): Catch exception
         // FIXME(Unavailable): String can have length higher than `int.MAX`.
-        // PERF(Unavailable): Is there really not a way to turn a `List` into
-        // a `ReadOnlySpan`?
         var length = int.Parse(bytesBuffer.ToArray());
 
         byte[] bytes = reader.ReadBytes(length);
 
         if (bytes.Length != length)
         {
-            return ParsingError.UnexpectedEof;
+            return ParsingError.EndOfStream;
         }
 
         return new BValue(new BString(bytes));
@@ -113,18 +111,18 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
 
         if (read != 'e')
         {
-            return InvalidFormatError.UnclosedPrefix('i');
+            return ParsingError.UnclosedPrefix('i');
         }
         switch (chars)
         {
             case []:
-                return InvalidFormatError.EmptyInteger;
+                return ParsingError.EmptyInteger;
             case ['0', _, ..]:
-                return InvalidFormatError.LeadingZeros;
+                return ParsingError.LeadingZeros;
             // FIXME(Unavailable): Both `LeadingZeros` and `MinusZero` should be returned with
             // `-00`.
             case ['-', '0', ..]:
-                return InvalidFormatError.MinusZero;
+                return ParsingError.MinusZero;
         }
 
         try
@@ -135,7 +133,7 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
         }
         catch (FormatException ex)
         {
-            return InvalidFormatError.Custom("Invalid integer format", ex);
+            return ParsingError.FormatException("Invalid integer format", ex);
         }
     }
 
@@ -164,7 +162,7 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
 
         if (peek != 'e')
         {
-            return InvalidFormatError.UnclosedPrefix('l');
+            return ParsingError.UnclosedPrefix('l');
         }
 
         return new BValue(new BList(result));
@@ -194,7 +192,7 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
 
             if (!key.TryPickT0(out var keyString, out var _))
             {
-                return InvalidFormatError.KeyIsNotString;
+                return ParsingError.KeyIsNotString;
             }
 
             if (Parse(reader).TryPickT0(out var value, out var valueError))
@@ -204,17 +202,16 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
             else
             {
                 return
-                    valueError.TryPickT1(out var formatError, out var _)
-                    // TODO(Unavailable): InvalidFormatError.Equals() override
-                    && formatError.Message == InvalidFormatError.InvalidPrefixChar('e').AsT1.Message
-                    ? InvalidFormatError.MissingDictionaryValues(keyString.AsString())
+                    valueError.TryPickT1(out var _, out var _)
+                    && valueError.Equals(ParsingError.InvalidPrefixChar('e'))
+                    ? ParsingError.MissingDictionaryValues(keyString.AsString())
                     : valueError;
             }
         }
 
         if (peek != 'e')
         {
-            return InvalidFormatError.UnclosedPrefix('d');
+            return ParsingError.UnclosedPrefix('d');
         }
 
         return new BValue(new BDictionary(result));
@@ -287,79 +284,79 @@ public record BDictionary(SortedDictionary<BString, BValue> Values)
 
 // FIXME(Unavailable): Add `IOException` as one of the cases.
 [GenerateOneOf]
-public partial class ParsingError : OneOfBase<UnexpectedEofError, InvalidFormatError>
+public partial class ParsingError : OneOfBase<EndOfStreamException, FormatException>
 {
-    // FIXME(Unavailable): Reuse `EndOfStreamException`.
-    internal static readonly ParsingError UnexpectedEof = new UnexpectedEofError();
-}
-
-public readonly record struct UnexpectedEofError;
-
-// TODO(Unavailable): Should I reuse `FormatException`, and move the helper
-// constructors into `ParsingError`?
-//
-// TODO(Unavailable): Implement `IEquatable<T>`.
-//
-// Remember to refactor the `error.Message.ShouldBe(...)` mess on `BValueTests`.
-public class InvalidFormatError : Exception
-{
-    private InvalidFormatError(string? message)
-        : base(message)
+    public Exception AsException()
     {
-        ArgumentException.ThrowIfNullOrEmpty(message);
+        return (Exception)Value;
     }
 
-    private InvalidFormatError(string? message, Exception? innerException)
-        : base(message, innerException)
+    public override int GetHashCode()
     {
-        ArgumentException.ThrowIfNullOrEmpty(message);
+        return Value.GetHashCode();
+    }
+
+    public override bool Equals(object obj)
+    {
+        return Equals(obj as ParsingError);
+    }
+
+    public virtual bool Equals(ParsingError? other)
+    {
+        return other is not null
+            && (
+                (IsT0 && other.IsT0 && AsT0.Message == other.AsT0.Message)
+                || (IsT1 && other.IsT1 && AsT1.Message == other.AsT1.Message)
+            );
     }
 
     // NOTE: Please ignore the order of these. They are supposed to be ordered
     // by how they appear on this file.
 
+    internal static readonly ParsingError EndOfStream = new EndOfStreamException();
+
     internal static ParsingError InvalidPrefixChar(char prefix)
     {
-        return new ParsingError(new InvalidFormatError($"Invalid prefix character '{prefix}'."));
+        return new ParsingError(new FormatException($"Invalid prefix character '{prefix}'."));
     }
 
-    internal static readonly ParsingError MissingColon = new InvalidFormatError(
+    internal static readonly ParsingError MissingColon = new FormatException(
         "Missing ':' separator for string prefix."
     );
 
-    internal static readonly ParsingError EmptyInteger = new InvalidFormatError(
+    internal static readonly ParsingError EmptyInteger = new FormatException(
         "Empty integers (ie) are not valid."
     );
 
-    internal static readonly ParsingError LeadingZeros = new InvalidFormatError(
+    internal static readonly ParsingError LeadingZeros = new FormatException(
         "Leading zeros (01) are not allowed on integers."
     );
 
-    internal static readonly ParsingError MinusZero = new InvalidFormatError(
+    internal static readonly ParsingError MinusZero = new FormatException(
         "'-0' is not a valid integer value."
     );
 
     internal static ParsingError UnclosedPrefix(char prefix)
     {
-        return new InvalidFormatError($"The prefix '{prefix}' wasn't closed with 'e'.");
+        return new FormatException($"The prefix '{prefix}' wasn't closed with 'e'.");
     }
 
-    internal static readonly ParsingError KeyIsNotString = new InvalidFormatError(
+    internal static readonly ParsingError KeyIsNotString = new FormatException(
         "Dictionary's keys can only be strings."
     );
 
     internal static ParsingError MissingDictionaryValues(string key)
     {
-        return new InvalidFormatError($"The dictionary key '{key}' is missing a value.");
+        return new FormatException($"The dictionary key '{key}' is missing a value.");
     }
 
-    internal static ParsingError Custom(string message)
+    internal static ParsingError FormatException(string message)
     {
-        return new InvalidFormatError(message);
+        return new FormatException(message);
     }
 
-    internal static ParsingError Custom(string message, Exception exception)
+    internal static ParsingError FormatException(string message, Exception exception)
     {
-        return new InvalidFormatError(message, exception);
+        return new FormatException(message, exception);
     }
 }

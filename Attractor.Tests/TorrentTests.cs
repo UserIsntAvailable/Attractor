@@ -8,14 +8,14 @@ public class TorrentTests
     [InlineData("Resources/sample.torrent")]
     public void ItWorks(string path)
     {
-        var fullPath = path;
-
-        using var file = System.IO.File.OpenText(fullPath);
+        using var file = System.IO.File.OpenText(path);
         var torrent = Torrent.Parse(file.BaseStream).AsT0;
 
         torrent.Announce.AbsoluteUri.ShouldBe(
             "http://bittorrent-test-tracker.codecrafters.io/announce"
         );
-        torrent.Info.Kind.AsT0.Length.ShouldBe(92063);
+        torrent.Info.FileKind.AsT0.Length.ShouldBe(92063);
     }
+
+    // TEST(Unavailable): Write 'Fails' cases.
 }

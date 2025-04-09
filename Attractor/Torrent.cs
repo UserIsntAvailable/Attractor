@@ -4,7 +4,7 @@ using OneOf;
 namespace Attractor;
 
 /// <summary>
-/// A Metainfo file (also known as .torrent files)
+/// A Metainfo file (also known as .torrent file)
 /// </summary>
 ///
 /// <param name="Announce">The URL of the tracker</param>
@@ -20,21 +20,21 @@ public record Torrent(Uri Announce, Info Info)
         var torrentResult = BValue.Parse(stream);
         if (torrentResult.TryPickT1(out var error, out var torrentOk))
         {
-            return error;
+            return ParsingError.FormatException("Invalid torrent file.", error.AsException());
         }
         if (!torrentOk.TryPickT3(out var torrent, out var _))
         {
-            throw new NotImplementedException();
+            return ParsingError.FormatException("Torrent files are bencoded directories.");
         }
 
         var announceValue = torrent["announce"];
         if (announceValue is null)
         {
-            throw new NotImplementedException();
+            return ParsingError.FormatException("Missing 'announce' key.");
         }
         if (!announceValue.TryPickT0(out var announceString, out var _))
         {
-            throw new NotImplementedException();
+            return ParsingError.FormatException("The 'announce' key should have a 'string' value.");
         }
         // FIXME(Unavailable): try `UriFormatException`.
         var announce = new Uri(announceString.AsString());
@@ -42,34 +42,53 @@ public record Torrent(Uri Announce, Info Info)
         var infoValue = torrent["info"];
         if (infoValue is null)
         {
-            throw new NotImplementedException();
+            return ParsingError.FormatException("Missing 'info' key");
         }
         if (!infoValue.TryPickT3(out var info, out var _))
         {
-            throw new NotImplementedException();
+            return ParsingError.FormatException("The 'info' key should have a 'dictionary' value.");
         }
 
         var nameValue = info["name"];
-        if (nameValue is null || !nameValue.TryPickT0(out var name, out var _))
+        if (nameValue is null)
         {
-            throw new NotImplementedException();
+            return ParsingError.FormatException("Missing 'info.name' key.");
+        }
+        if (!nameValue.TryPickT0(out var name, out var _))
+        {
+            return ParsingError.FormatException(
+                "The 'info.name' key should have a 'string' value."
+            );
         }
 
         var pieceLengthValue = info["piece length"];
-        if (pieceLengthValue is null || !pieceLengthValue.TryPickT1(out var pieceLength, out var _))
+        if (pieceLengthValue is null)
         {
-            throw new NotImplementedException();
+            return ParsingError.FormatException("Missing 'info.piece length' key.");
+        }
+        if (!pieceLengthValue.TryPickT1(out var pieceLength, out var _))
+        {
+            return ParsingError.FormatException(
+                "The 'info.piece length' key should have an 'integer' value."
+            );
         }
 
         var piecesValue = info["pieces"];
-        if (piecesValue is null || !piecesValue.TryPickT0(out var piecesBytes, out var _))
+        if (piecesValue is null)
         {
-            throw new NotImplementedException();
+            return ParsingError.FormatException("Missing 'info.pieces' key.");
         }
-
+        if (!piecesValue.TryPickT0(out var piecesBytes, out var _))
+        {
+            return ParsingError.FormatException(
+                "The 'info.pieces' key should have an 'string' value."
+            );
+        }
         if (piecesBytes.Bytes.Length % 20 != 0)
         {
-            throw new NotImplementedException();
+            return ParsingError.FormatException(
+                "The 'info.pieces' key should have a size that is multiple of '20'."
+            );
         }
 
         // PERF(Unavailable): This surely could be written better.
@@ -78,9 +97,17 @@ public record Torrent(Uri Announce, Info Info)
         var singleFileLength = info["length"];
         var multiFileFiles = info["files"];
 
+        if (singleFileLength is null && multiFileFiles is null)
+        {
+            return ParsingError.FormatException(
+                "A 'info.length' or 'info.files' key should be provided."
+            );
+        }
         if (singleFileLength is not null && multiFileFiles is not null)
         {
-            throw new NotImplementedException();
+            return ParsingError.FormatException(
+                "Both 'info.length' and 'info.files' keys can't be provided at the same time."
+            );
         }
 
         FileKind fileKind;
@@ -95,35 +122,57 @@ public record Torrent(Uri Announce, Info Info)
         {
             if (files.Values.Count == 0)
             {
-                throw new NotImplementedException();
+                return ParsingError.FormatException(
+                    "The 'info.files' value can't have zero elements."
+                );
             }
 
             List<File> mappedFiles = new(files.Values.Count);
-            foreach (var file in files)
+            foreach (var (fileIndex, file) in files.Index())
             {
                 if (!multiFileFiles.TryPickT3(out var fileDict, out var _))
                 {
-                    throw new NotImplementedException();
+                    return ParsingError.FormatException(
+                        $"The 'info.files[{fileIndex}]' key should have a 'dictionary' value."
+                    );
                 }
 
                 var lengthValue = info["length"];
-                if (lengthValue is null || !lengthValue.TryPickT1(out var multiLength, out var _))
+                if (lengthValue is null)
                 {
-                    throw new NotImplementedException();
+                    return ParsingError.FormatException(
+                        $"Missing 'info.files[{fileIndex}].length' key."
+                    );
+                }
+                if (!lengthValue.TryPickT1(out var multiLength, out var _))
+                {
+                    return ParsingError.FormatException(
+                        $"The 'info.files[{fileIndex}].length' key should have a 'integer' value."
+                    );
                 }
 
                 var pathValue = info["path"];
-                if (pathValue is null || !pathValue.TryPickT2(out var path, out var _))
+                if (pathValue is null)
                 {
-                    throw new NotImplementedException();
+                    return ParsingError.FormatException(
+                        $"Missing 'info.files[{fileIndex}].path' key."
+                    );
+                }
+                if (!pathValue.TryPickT2(out var path, out var _))
+                {
+                    return ParsingError.FormatException(
+                        $"The 'info.files[{fileIndex}].path' key should have a 'list' value."
+                    );
                 }
 
                 List<string> mappedPaths = new(path.Values.Count);
-                foreach (var dirNameValue in path)
+                foreach (var (dirNameIndex, dirNameValue) in path.Index())
                 {
                     if (!dirNameValue.TryPickT0(out var dirName, out var _))
                     {
-                        throw new NotImplementedException();
+                        return ParsingError.FormatException(
+                            $"The 'info.files[{fileIndex}].path[{dirNameIndex}]' key should have a 'string' value."
+                        );
                     }
                     mappedPaths.Add(dirName.AsString());
                 }
@@ -135,7 +184,11 @@ public record Torrent(Uri Announce, Info Info)
         }
         else
         {
-            throw new NotImplementedException();
+            return singleFileLength is null
+                ? ParsingError.FormatException(
+                    "The 'info.length' key should have a 'string' value."
+                )
+                : ParsingError.FormatException("The 'info.files' key should have a 'list' value.");
         }
 
         return new Torrent(announce, new Info(name.AsString(), pieceLength, pieces, fileKind));
@@ -162,7 +215,7 @@ public record Torrent(Uri Announce, Info Info)
 /// A list of strings which are of length 20, where each of which is the SHA1
 /// hash of the piece at the corresponding index.
 /// </param>
-public record Info(string Name, BigInteger PieceLength, List<string> Pieces, FileKind Kind) { }
+public record Info(string Name, BigInteger PieceLength, List<string> Pieces, FileKind FileKind) { }
 
 /// <summary>
 /// There is also a key length or a key files, but not both or neither. If
