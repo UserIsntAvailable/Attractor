@@ -15,14 +15,14 @@ namespace Attractor;
 /// A benconded value
 /// </summary>
 [GenerateOneOf]
-public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionnary>
+public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
 {
     // TODO(Unavailable): async methods.
 
     // TODO(Unavailable): Simplify unclosed prefix reading to avoid
     // `if (peek/read != 'e')`.
 
-    // TODO(Unavailable): As/TryPick{BString, BigInteger, BList, BDictionnary} conversions.
+    // TODO(Unavailable): As/TryPick{BString, BigInteger, BList, BDictionary} conversions.
 
     // DOCS(Unavailable): Encourage to buffer the stream to optimize performance.
 
@@ -50,22 +50,41 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionnary
             return ParsingError.UnexpectedEof;
         }
 
-        return (char)value switch
+        var prefix = (char)value;
+        return prefix switch
         {
-            >= '0' and <= '9' => ParseString(value - '0', reader),
+            >= '0' and <= '9' => ParseString(prefix, reader),
             'i' => ParseBigInteger(reader),
             'l' => ParseList(reader),
-            'd' => ParseDictionnary(reader),
+            'd' => ParseDictionary(reader),
             _ => InvalidFormatError.InvalidPrefixChar((char)value),
         };
     }
 
-    private static OneOf<BValue, ParsingError> ParseString(int length, BinaryReader reader)
+    private static OneOf<BValue, ParsingError> ParseString(char firstDigit, BinaryReader reader)
     {
-        if (reader.Read() != ':')
+        List<byte> bytesBuffer = new(10) { (byte)firstDigit };
+
+        int read;
+        while ((read = reader.Read()) != -1)
+        {
+            if (read == ':')
+            {
+                break;
+            }
+            bytesBuffer.Add((byte)read);
+        }
+
+        if (read != ':')
         {
             return InvalidFormatError.MissingColon;
         }
+
+        // FIXME(Unavailable): Catch exception
+        // FIXME(Unavailable): String can have length higher than `int.MAX`.
+        // PERF(Unavailable): Is there really not a way to turn a `List` into
+        // a `ReadOnlySpan`?
+        var length = int.Parse(bytesBuffer.ToArray());
 
         byte[] bytes = reader.ReadBytes(length);
 
@@ -151,7 +170,7 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionnary
         return new BValue(new BList(result));
     }
 
-    private static OneOf<BValue, ParsingError> ParseDictionnary(BinaryReader reader)
+    private static OneOf<BValue, ParsingError> ParseDictionary(BinaryReader reader)
     {
         SortedDictionary<BString, BValue> result = [];
 
@@ -188,7 +207,7 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionnary
                     valueError.TryPickT1(out var formatError, out var _)
                     // TODO(Unavailable): InvalidFormatError.Equals() override
                     && formatError.Message == InvalidFormatError.InvalidPrefixChar('e').AsT1.Message
-                    ? InvalidFormatError.MissingDictionnaryValue(keyString.AsString())
+                    ? InvalidFormatError.MissingDictionaryValues(keyString.AsString())
                     : valueError;
             }
         }
@@ -198,7 +217,7 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionnary
             return InvalidFormatError.UnclosedPrefix('d');
         }
 
-        return new BValue(new BDictionnary(result));
+        return new BValue(new BDictionary(result));
     }
 }
 
@@ -241,17 +260,17 @@ public record BList(List<BValue> Values) : IEnumerable<BValue>
     }
 }
 
-public record BDictionnary(SortedDictionary<BString, BValue> Values)
+public record BDictionary(SortedDictionary<BString, BValue> Values)
     : IEnumerable<KeyValuePair<BString, BValue>>
 {
-    public virtual bool Equals(BDictionnary? other)
+    public virtual bool Equals(BDictionary? other)
     {
         return other != null && Values.SequenceEqual(other.Values);
     }
 
     public BValue? this[BString key] => Values.TryGetValue(key, out var value) ? null : value;
 
-    public BValue? this[string key] => Values[new BString(Encoding.UTF8.GetBytes(key))];
+    public BValue? this[string key] => this[new BString(Encoding.UTF8.GetBytes(key))];
 
     public IEnumerator<KeyValuePair<BString, BValue>> GetEnumerator()
     {
@@ -330,7 +349,7 @@ public class InvalidFormatError : Exception
         "Dictionary's keys can only be strings."
     );
 
-    internal static ParsingError MissingDictionnaryValue(string key)
+    internal static ParsingError MissingDictionaryValues(string key)
     {
         return new InvalidFormatError($"The dictionnary key '{key}' is missing a value.");
     }

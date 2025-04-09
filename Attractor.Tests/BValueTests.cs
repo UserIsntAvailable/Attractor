@@ -9,6 +9,7 @@ public class BValueTests
     [Theory]
     [InlineData("")]
     [InlineData("spam")]
+    [InlineData("supercalifragilisticexpialidocious")]
     public void StringParsingWorks(string expected)
     {
         var expectedEncoded = StringAsStream($"{expected.Length}:{expected}");
@@ -101,7 +102,7 @@ public class BValueTests
     [InlineData()]
     [InlineData("3:cow", "3:moo", "4:spam", "4:eggs")]
     [InlineData("4:spam", "l1:a1:bee")]
-    public void DictionnaryParsingWorks(params string[] expectedList)
+    public void DictionaryParsingWorks(params string[] expectedList)
     {
         var expected = expectedList
             .Chunk(2)
@@ -133,7 +134,7 @@ public class BValueTests
     [InlineData("di0e4:spame")]
     [InlineData("dle2:me")]
     [InlineData("dd0:leei5ee")]
-    public void DictionnaryParsingFails_WhenKeyIsNotString(string expected)
+    public void DictionaryParsingFails_WhenKeyIsNotString(string expected)
     {
         var expectedEncoded = StringAsStream(expected);
         var error = BValue.Parse(expectedEncoded).AsT1;
@@ -142,12 +143,12 @@ public class BValueTests
     }
 
     [Fact]
-    public void DictionnaryParsingFails_WhenMissingDictionnaryValue()
+    public void DictionaryParsingFails_WhenMissingDictionaryValue()
     {
         var expectedEncoded = StringAsStream("d0:e");
         var error = BValue.Parse(expectedEncoded).AsT1.AsT1;
 
-        error.Message.ShouldBe(InvalidFormatError.MissingDictionnaryValue("").AsT1.Message);
+        error.Message.ShouldBe(InvalidFormatError.MissingDictionaryValues("").AsT1.Message);
     }
 
     [Theory]
