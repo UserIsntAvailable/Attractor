@@ -63,7 +63,7 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
 
     private static OneOf<BValue, ParsingError> ParseString(char firstDigit, BinaryReader reader)
     {
-        List<byte> bytesBuffer = new(10) { (byte)firstDigit };
+        List<char> chars = new(10) { firstDigit };
 
         int read;
         while ((read = reader.Read()) != -1)
@@ -72,19 +72,20 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
             {
                 break;
             }
-            bytesBuffer.Add((byte)read);
+            chars.Add((char)read);
         }
 
         if (read != ':')
         {
             return ParsingError.MissingColon;
         }
+        if (BigIntegerFromChars(chars).TryPickT1(out var error, out var length))
+        {
+            return ParsingError.FormatException("Invalid string length prefix.", error);
+        }
 
-        // FIXME(Unavailable): Catch exception
-        // FIXME(Unavailable): String can have length higher than `int.MAX`.
-        var length = int.Parse(bytesBuffer.ToArray());
-
-        byte[] bytes = reader.ReadBytes(length);
+        // FIXME(Unavailable): strings can have length higher than `int.MAX`.
+        byte[] bytes = reader.ReadBytes((int)length);
 
         if (bytes.Length != length)
         {
@@ -125,16 +126,7 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
                 return ParsingError.MinusZero;
         }
 
-        try
-        {
-            NumberStyles style = NumberStyles.AllowLeadingSign;
-            NumberFormatInfo provider = new() { PositiveSign = "" };
-            return new BValue(BigInteger.Parse(chars.ToArray(), style, provider));
-        }
-        catch (FormatException ex)
-        {
-            return ParsingError.FormatException("Invalid integer format", ex);
-        }
+        return BigIntegerFromChars(chars).MapT0((x) => new BValue(x));
     }
 
     private static OneOf<BValue, ParsingError> ParseList(BinaryReader reader)
@@ -171,6 +163,7 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
     private static OneOf<BValue, ParsingError> ParseDictionary(BinaryReader reader)
     {
         SortedDictionary<BString, BValue> result = [];
+        BString? lastKey = default;
 
         int peek;
         while ((peek = reader.PeekChar()) != -1)
@@ -180,8 +173,6 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
                 _ = reader.Read();
                 break;
             }
-
-            // FIXME(Unavailable): key ordering is indeed required while parsing.
 
             // FIXME(Unavailable): This is _very_ bad, because we only need to
             // check if string parsing works.
@@ -195,15 +186,20 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
                 return ParsingError.KeyIsNotString;
             }
 
+            if (keyString < lastKey!)
+            {
+                return ParsingError.UnorderedKeys;
+            }
+            // FIXME(Unavailable): What should happen with key duplicates?
+            lastKey = keyString;
+
             if (Parse(reader).TryPickT0(out var value, out var valueError))
             {
                 result.Add(keyString, value);
             }
             else
             {
-                return
-                    valueError.TryPickT1(out var _, out var _)
-                    && valueError.Equals(ParsingError.InvalidPrefixChar('e'))
+                return valueError.Equals(ParsingError.InvalidPrefixChar('e'))
                     ? ParsingError.MissingDictionaryValues(keyString.AsString())
                     : valueError;
             }
@@ -215,6 +211,20 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
         }
 
         return new BValue(new BDictionary(result));
+    }
+
+    private static OneOf<BigInteger, ParsingError> BigIntegerFromChars(List<char> chars)
+    {
+        try
+        {
+            NumberStyles style = NumberStyles.AllowLeadingSign;
+            NumberFormatInfo provider = new() { PositiveSign = "" };
+            return BigInteger.Parse(chars.ToArray(), style, provider);
+        }
+        catch (FormatException ex)
+        {
+            return ParsingError.FormatException("Invalid integer format", ex);
+        }
     }
 }
 
@@ -229,13 +239,32 @@ public record BString(byte[] Bytes) : IComparable<BString>
 
     public virtual bool Equals(BString? other)
     {
-        return other != null && Bytes.AsSpan().SequenceEqual(other.Bytes);
+        return other is not null && Bytes.AsSpan().SequenceEqual(other.Bytes);
     }
 
-    // TODO(Unavailable): overload `>`, `>=`, `<`, and `<=`.
     public int CompareTo(BString? other)
     {
-        return other == null ? 1 : Bytes.AsSpan().SequenceCompareTo(other!.Bytes);
+        return other is null ? 1 : Bytes.AsSpan().SequenceCompareTo(other!.Bytes);
+    }
+
+    public static bool operator >(BString self, BString other)
+    {
+        return self.CompareTo(other) > 0;
+    }
+
+    public static bool operator >=(BString self, BString other)
+    {
+        return self.CompareTo(other) >= 0;
+    }
+
+    public static bool operator <(BString self, BString other)
+    {
+        return self.CompareTo(other) < 0;
+    }
+
+    public static bool operator <=(BString self, BString other)
+    {
+        return self.CompareTo(other) <= 0;
     }
 }
 
@@ -243,7 +272,7 @@ public record BList(List<BValue> Values) : IEnumerable<BValue>
 {
     public virtual bool Equals(BList? other)
     {
-        return other != null && Values.SequenceEqual(other.Values);
+        return other is not null && Values.SequenceEqual(other.Values);
     }
 
     public IEnumerator<BValue> GetEnumerator()
@@ -262,7 +291,7 @@ public record BDictionary(SortedDictionary<BString, BValue> Values)
 {
     public virtual bool Equals(BDictionary? other)
     {
-        return other != null && Values.SequenceEqual(other.Values);
+        return other is not null && Values.SequenceEqual(other.Values);
     }
 
     public BValue? this[BString key] => Values.TryGetValue(key, out var value) ? value : null;
@@ -280,8 +309,7 @@ public record BDictionary(SortedDictionary<BString, BValue> Values)
     }
 }
 
-// errors
-
+// TODO(Unavailable): Move to its own file.
 // FIXME(Unavailable): Add `IOException` as one of the cases.
 [GenerateOneOf]
 public partial class ParsingError : OneOfBase<EndOfStreamException, FormatException>
@@ -310,14 +338,28 @@ public partial class ParsingError : OneOfBase<EndOfStreamException, FormatExcept
             );
     }
 
-    // NOTE: Please ignore the order of these. They are supposed to be ordered
-    // by how they appear on this file.
+    // NOTE: Try to order these by the 'category' of the helper.
 
     internal static readonly ParsingError EndOfStream = new EndOfStreamException();
+
+    internal static ParsingError FormatException(string message)
+    {
+        return new FormatException(message);
+    }
+
+    internal static ParsingError FormatException(string message, ParsingError error)
+    {
+        return new FormatException(message, error.AsException());
+    }
 
     internal static ParsingError InvalidPrefixChar(char prefix)
     {
         return new ParsingError(new FormatException($"Invalid prefix character '{prefix}'."));
+    }
+
+    internal static ParsingError UnclosedPrefix(char prefix)
+    {
+        return new FormatException($"The prefix '{prefix}' wasn't closed with 'e'.");
     }
 
     internal static readonly ParsingError MissingColon = new FormatException(
@@ -336,27 +378,16 @@ public partial class ParsingError : OneOfBase<EndOfStreamException, FormatExcept
         "'-0' is not a valid integer value."
     );
 
-    internal static ParsingError UnclosedPrefix(char prefix)
-    {
-        return new FormatException($"The prefix '{prefix}' wasn't closed with 'e'.");
-    }
-
     internal static readonly ParsingError KeyIsNotString = new FormatException(
         "Dictionary's keys can only be strings."
+    );
+
+    internal static readonly ParsingError UnorderedKeys = new FormatException(
+        "Dictionary's keys should be ordered by the 'raw' bytes string representation."
     );
 
     internal static ParsingError MissingDictionaryValues(string key)
     {
         return new FormatException($"The dictionary key '{key}' is missing a value.");
-    }
-
-    internal static ParsingError FormatException(string message)
-    {
-        return new FormatException(message);
-    }
-
-    internal static ParsingError FormatException(string message, Exception exception)
-    {
-        return new FormatException(message, exception);
     }
 }

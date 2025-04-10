@@ -20,7 +20,7 @@ public record Torrent(Uri Announce, Info Info)
         var torrentResult = BValue.Parse(stream);
         if (torrentResult.TryPickT1(out var error, out var torrentOk))
         {
-            return ParsingError.FormatException("Invalid torrent file.", error.AsException());
+            return ParsingError.FormatException("Invalid torrent file.", error);
         }
         if (!torrentOk.TryPickT3(out var torrent, out var _))
         {

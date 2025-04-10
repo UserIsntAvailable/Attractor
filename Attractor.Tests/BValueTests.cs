@@ -143,6 +143,17 @@ public class BValueTests
         error.ShouldBe(ParsingError.KeyIsNotString);
     }
 
+    [Theory]
+    [InlineData("d1:zi0e1:yi0ee")]
+    [InlineData("d1:8le2:11i0ee")]
+    public void DictionaryParsingFails_WhenUnorderedKeys(string expected)
+    {
+        var expectedEncoded = StringAsStream(expected);
+        var error = BValue.Parse(expectedEncoded).AsT1;
+
+        error.ShouldBe(ParsingError.UnorderedKeys);
+    }
+
     [Fact]
     public void DictionaryParsingFails_WhenMissingDictionaryValue()
     {
