@@ -36,8 +36,15 @@ public record Torrent(Uri Announce, Info Info)
         {
             return ParsingError.FormatException("The 'announce' key should have a 'string' value.");
         }
-        // FIXME(Unavailable): try `UriFormatException`.
-        var announce = new Uri(announceString.AsString());
+        Uri announce;
+        try
+        {
+            announce = new(announceString.AsString());
+        }
+        catch (UriFormatException ex)
+        {
+            return ParsingError.FormatException("'announce' is an invalid url.", ex);
+        }
 
         var infoValue = torrent["info"];
         if (infoValue is null)
@@ -91,8 +98,7 @@ public record Torrent(Uri Announce, Info Info)
             );
         }
 
-        // PERF(Unavailable): This surely could be written better.
-        var pieces = piecesBytes.AsString().Chunk(20).Select(static (x) => new string(x)).ToList();
+        var pieces = piecesBytes.Bytes.Chunk(20).Select(static (x) => new BString(x)).ToList();
 
         var singleFileLength = info["length"];
         var multiFileFiles = info["files"];
@@ -195,6 +201,9 @@ public record Torrent(Uri Announce, Info Info)
     }
 }
 
+// FIXME(Unavailable): Once a torrent file is parsed an user could break the
+// spec invariant by modifying the `Info` record.
+
 /// <param name="Name">
 /// The suggested name to save the file (or directory) as. It is purely advisory.
 ///
@@ -215,7 +224,7 @@ public record Torrent(Uri Announce, Info Info)
 /// A list of strings which are of length 20, where each of which is the SHA1
 /// hash of the piece at the corresponding index.
 /// </param>
-public record Info(string Name, BigInteger PieceLength, List<string> Pieces, FileKind FileKind) { }
+public record Info(string Name, BigInteger PieceLength, List<BString> Pieces, FileKind FileKind) { }
 
 /// <summary>
 /// There is also a key length or a key files, but not both or neither. If
