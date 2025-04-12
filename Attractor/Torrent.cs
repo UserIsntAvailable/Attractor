@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Security.Cryptography;
 using OneOf;
 
 namespace Attractor;
@@ -204,6 +205,8 @@ public record Torrent(Uri Announce, Info Info)
 // FIXME(Unavailable): Once a torrent file is parsed an user could break the
 // spec invariant by modifying the `Info` record.
 
+// TODO(Unavailable): `Sha1` newtype?
+
 /// <param name="Name">
 /// The suggested name to save the file (or directory) as. It is purely advisory.
 ///
@@ -224,7 +227,70 @@ public record Torrent(Uri Announce, Info Info)
 /// A list of strings which are of length 20, where each of which is the SHA1
 /// hash of the piece at the corresponding index.
 /// </param>
-public record Info(string Name, BigInteger PieceLength, List<BString> Pieces, FileKind FileKind) { }
+public record Info(string Name, BigInteger PieceLength, List<BString> Pieces, FileKind FileKind)
+{
+    /// <summary>
+    /// The 20 byte SHA1 hash of the bencoded form.
+    /// </summary>
+    public byte[] Hash()
+    {
+        using var sha1Encoder = SHA1.Create();
+        using var stream = new MemoryStream(256);
+
+        // PERF(Unavailable): This is not as optimal as I would like...
+
+        var dict = new SortedDictionary<BString, BValue>()
+        {
+            { new BString("name"), new BValue(new BString(Name)) },
+            { new BString("piece length"), PieceLength },
+            { new BString("pieces"), new BString([.. Pieces.SelectMany((x) => x.Bytes)]) },
+        };
+
+        if (FileKind.TryPickT0(out var singleFile, out var multiFile))
+        {
+            dict.Add(new BString("length"), singleFile.Length);
+        }
+        else
+        {
+            dict.Add(
+                new BString("files"),
+                new BList(
+                    [
+                        .. multiFile.Files.Select(
+                            (file) =>
+                                // TODO(Unavailable): `implicit` operators for
+                                // `BList` and `BDictionary`?
+                                new BValue(
+                                    new BDictionary(
+                                        new SortedDictionary<BString, BValue>()
+                                        {
+                                            { new BString("length"), file.Length },
+                                            {
+                                                new BString("path"),
+                                                new BList(
+                                                    [
+                                                        .. file.Path.Select(
+                                                            (x) => new BValue(new BString(x))
+                                                        ),
+                                                    ]
+                                                )
+                                            },
+                                        }
+                                    )
+                                )
+                        ),
+                    ]
+                )
+            );
+        }
+
+        // FIXME(Unavailable): Propagate error.
+        new BValue(new BDictionary(dict)).Encode(stream);
+        stream.Position = 0;
+
+        return sha1Encoder.ComputeHash(stream);
+    }
+}
 
 /// <summary>
 /// There is also a key length or a key files, but not both or neither. If

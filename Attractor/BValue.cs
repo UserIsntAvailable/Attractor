@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Numerics;
 using System.Text;
 using OneOf;
+using OneOf.Types;
 
 // TODO(Unavailable): Is there a way to do this from the `.csproj` file.
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Attractor.Tests")]
@@ -42,6 +43,56 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
         return Parse(reader);
     }
 
+    public OneOf<IOException, None> Encode(Stream stream)
+    {
+        // FIXME(Unavailable): try/catch and properly propagate recursive
+        // exception errors.
+        return Match(
+            (str) =>
+            {
+                stream.Write(
+                    [
+                        // FIXME(Unavailable): FormatProvider
+                        .. Encoding.UTF8.GetBytes(str.Bytes.Length.ToString()),
+                        (byte)':',
+                        .. str.Bytes,
+                    ]
+                );
+                return new None();
+            },
+            (@int) =>
+            {
+                // FIXME(Unavailable): FormatProvider
+                stream.Write([(byte)'i', .. Encoding.UTF8.GetBytes(@int.ToString()), (byte)'e']);
+                return new None();
+            },
+            (list) =>
+            {
+                stream.Write([(byte)'l']);
+                foreach (var elem in list)
+                {
+                    elem.Encode(stream);
+                }
+                stream.Write([(byte)'e']);
+                return new None();
+            },
+            (dict) =>
+            {
+                stream.Write([(byte)'d']);
+                foreach (var (key, val) in dict)
+                {
+                    new BValue(key).Encode(stream);
+                    val.Encode(stream);
+                }
+                stream.Write([(byte)'e']);
+                return new None();
+            }
+        );
+    }
+}
+
+public partial class BValue
+{
     private static OneOf<BValue, ParsingError> Parse(BinaryReader reader)
     {
         int value;
@@ -232,6 +283,9 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
 // BDictionary keys).
 public record BString(byte[] Bytes) : IComparable<BString>
 {
+    public BString(string byteString)
+        : this(Encoding.UTF8.GetBytes(byteString)) { }
+
     public string AsString()
     {
         // FIXME(Unavailable): What kind of errors this would return if this
