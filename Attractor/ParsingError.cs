@@ -32,7 +32,7 @@ public partial class ParsingError : OneOfBase<EndOfStreamException, FormatExcept
             );
     }
 
-    // NOTE: Try to order these by the 'category' of the helper.
+    // NOTE(Unavailable): Try to order these by the 'category' of the helper.
 
     internal static readonly ParsingError EndOfStream = new EndOfStreamException();
 
@@ -51,7 +51,8 @@ public partial class ParsingError : OneOfBase<EndOfStreamException, FormatExcept
         return new FormatException(message, error.AsException());
     }
 
-    // NOTE: Fixes ambiguous calls with `FormatException(string, ParsingError)`.
+    // NOTE(Unavailable): Fixes ambiguous calls with
+    // `FormatException(string, ParsingError)`.
     internal static ParsingError FormatException(string message, FormatException error)
     {
         return new FormatException(message, error);

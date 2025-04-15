@@ -7,9 +7,6 @@ using System.Text;
 using OneOf;
 using OneOf.Types;
 
-// TODO(Unavailable): Is there a way to do this from the `.csproj` file.
-[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Attractor.Tests")]
-
 namespace Attractor;
 
 /// <summary>
@@ -35,12 +32,15 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
     /// <summary>
     /// Parses a <see cref="BValue"/> from the <paramref name="stream"/>.
     /// </summary>
-    public static OneOf<BValue, ParsingError> Parse(Stream stream)
+    public static OneOf<BValue, ParsingError> Parse(
+        Stream stream,
+        BValueParseOptions? opts = default
+    )
     {
         ArgumentNullException.ThrowIfNull(stream);
 
         using BinaryReader reader = new(stream, Encoding.UTF8, true);
-        return Parse(reader);
+        return Parse(reader, opts ?? new());
     }
 
     public OneOf<IOException, None> Encode(Stream stream)
@@ -93,7 +93,7 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
 
 public partial class BValue
 {
-    private static OneOf<BValue, ParsingError> Parse(BinaryReader reader)
+    private static OneOf<BValue, ParsingError> Parse(BinaryReader reader, BValueParseOptions opts)
     {
         int value;
         if ((value = reader.Read()) == -1)
@@ -106,8 +106,8 @@ public partial class BValue
         {
             >= '0' and <= '9' => ParseString(prefix, reader),
             'i' => ParseBigInteger(reader),
-            'l' => ParseList(reader),
-            'd' => ParseDictionary(reader),
+            'l' => ParseList(reader, opts),
+            'd' => ParseDictionary(reader, opts),
             _ => ParsingError.InvalidPrefixChar((char)value),
         };
     }
@@ -165,22 +165,21 @@ public partial class BValue
         {
             return ParsingError.UnclosedPrefix('i');
         }
-        switch (chars)
+        return chars switch
         {
-            case []:
-                return ParsingError.EmptyInteger;
-            case ['0', _, ..]:
-                return ParsingError.LeadingZeros;
-            // FIXME(Unavailable): Both `LeadingZeros` and `MinusZero` should be returned with
-            // `-00`.
-            case ['-', '0', ..]:
-                return ParsingError.MinusZero;
-        }
-
-        return BigIntegerFromChars(chars).MapT0((x) => new BValue(x));
+            [] => ParsingError.EmptyInteger,
+            ['0', _, ..] => ParsingError.LeadingZeros,
+            // FIXME(Unavailable): Both `LeadingZeros` and `MinusZero` should
+            // be returned with `-00`.
+            ['-', '0', ..] => ParsingError.MinusZero,
+            _ => BigIntegerFromChars(chars).MapT0((x) => new BValue(x)),
+        };
     }
 
-    private static OneOf<BValue, ParsingError> ParseList(BinaryReader reader)
+    private static OneOf<BValue, ParsingError> ParseList(
+        BinaryReader reader,
+        BValueParseOptions opts
+    )
     {
         List<BValue> result = [];
 
@@ -193,7 +192,7 @@ public partial class BValue
                 break;
             }
 
-            if (Parse(reader).TryPickT0(out var value, out var error))
+            if (Parse(reader, opts).TryPickT0(out var value, out var error))
             {
                 result.Add(value);
             }
@@ -211,7 +210,10 @@ public partial class BValue
         return new BValue(new BList(result));
     }
 
-    private static OneOf<BValue, ParsingError> ParseDictionary(BinaryReader reader)
+    private static OneOf<BValue, ParsingError> ParseDictionary(
+        BinaryReader reader,
+        BValueParseOptions opts
+    )
     {
         SortedDictionary<BString, BValue> result = [];
         BString? lastKey = default;
@@ -227,7 +229,7 @@ public partial class BValue
 
             // FIXME(Unavailable): This is _very_ bad, because we only need to
             // check if string parsing works.
-            if (Parse(reader).TryPickT1(out var keyError, out var key))
+            if (Parse(reader, opts).TryPickT1(out var keyError, out var key))
             {
                 return keyError;
             }
@@ -237,14 +239,14 @@ public partial class BValue
                 return ParsingError.KeyIsNotString;
             }
 
-            if (keyString < lastKey!)
+            if (opts.CheckDictionaryKeyOrder && keyString < lastKey!)
             {
                 return ParsingError.UnorderedKeys;
             }
             // FIXME(Unavailable): What should happen with key duplicates?
             lastKey = keyString;
 
-            if (Parse(reader).TryPickT0(out var value, out var valueError))
+            if (Parse(reader, opts).TryPickT0(out var value, out var valueError))
             {
                 result.Add(keyString, value);
             }
@@ -278,6 +280,8 @@ public partial class BValue
         }
     }
 }
+
+public record BValueParseOptions(bool CheckDictionaryKeyOrder = true) { }
 
 // TODO(Unavailable): `IsUTF8` property hint (I think it can be useful for
 // BDictionary keys).
