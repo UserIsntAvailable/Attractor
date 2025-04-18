@@ -13,7 +13,7 @@ public class BValueTests
     public void StringParsingWorks(string expected)
     {
         var expectedEncoded = StringAsStream($"{expected.Length}:{expected}");
-        var actual = BValue.Parse(expectedEncoded).AsT0.AsT0.AsString();
+        var actual = BValue.Parse(expectedEncoded).AsT0.AsT0.ToString();
 
         actual.ShouldBe(expected);
     }
@@ -91,7 +91,7 @@ public class BValueTests
     [InlineData("4:rand", "i0e", "li5ee")]
     public void ListParsingWorks(params string[] expectedList)
     {
-        var expected = expectedList.Select((x) => BValue.Parse(StringAsStream(x)).AsT0);
+        var expected = expectedList.Select(static (x) => BValue.Parse(StringAsStream(x)).AsT0);
         var expectedJoin = string.Join("", expectedList);
         var expectedEncoded = StringAsStream($"l{expectedJoin}e");
         var actual = BValue.Parse(expectedEncoded).AsT0.AsT2;

@@ -119,7 +119,7 @@ public record class TrackerRequest(
                 var peers = peersBytes
                     .Bytes.Chunk(6)
                     .Select(
-                        (bytes) =>
+                        static (bytes) =>
                             new Peer(
                                 new IPAddress(bytes.AsSpan()[..4]),
                                 BinaryPrimitives.ReadUInt16BigEndian(bytes.AsSpan()[4..])
@@ -136,7 +136,7 @@ public record class TrackerRequest(
         }
         else
         {
-            return new TrackerResponseErr(response["failure"]!.AsT0.AsString());
+            return new TrackerResponseErr(response["failure"]!.AsT0.ToString());
         }
     }
 
@@ -147,30 +147,30 @@ public record class TrackerRequest(
 
         StringBuilder sb = new("?", 152);
 
-        // FIXME(Unavailable): FormatProvider ...
-
-        sb.Append($"info_hash={infoHashEncoded}");
-        sb.Append($"&peer_id={peerIdEncoded}");
+        _ = sb.Append($"info_hash={infoHashEncoded}");
+        _ = sb.Append($"&peer_id={peerIdEncoded}");
         if (Ip is not null)
         {
-            sb.AppendFormat($"&ip={Ip}");
+            _ = sb.Append($"&ip={Ip}");
         }
-        sb.Append($"&port={Port}");
-        sb.Append($"&uploaded={Uploaded}");
-        sb.Append($"&downloaded={Downloaded}");
-        sb.Append($"&left={Left}");
+        _ = sb.Append($"&port={Port}");
+        _ = sb.Append($"&uploaded={Uploaded}");
+        _ = sb.Append($"&downloaded={Downloaded}");
+        _ = sb.Append($"&left={Left}");
         if (Event is not TrackerRequestEvent.Empty)
         {
+#pragma warning disable CS8524,IDE0072
             var eventMsg = Event switch
+#pragma warning restore CS8524,IDE0072
             {
                 TrackerRequestEvent.Started => "started",
                 TrackerRequestEvent.Completed => "completed",
                 TrackerRequestEvent.Stopped => "stopped",
-                _ => throw new UnreachableException(),
+                TrackerRequestEvent.Empty => throw new UnreachableException(),
             };
-            sb.Append($"&event={eventMsg}");
+            _ = sb.Append($"&event={eventMsg}");
         }
-        sb.Append($"&compact={(Compact ? 1 : 0)}");
+        _ = sb.Append($"&compact={(Compact ? 1 : 0)}");
 
         return sb.ToString();
     }

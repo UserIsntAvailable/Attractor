@@ -22,7 +22,7 @@ public class TorrentTests
             .ShouldBe("d69f91e6b2ae4c542468d1073a71d4ea13879a7f");
         torrent.Info.PieceLength.ShouldBe(32768);
         torrent
-            .Info.Pieces.Select((x) => Convert.ToHexStringLower(x.Bytes))
+            .Info.Pieces.Select(static (x) => Convert.ToHexStringLower(x.Bytes))
             .ShouldBe(
                 [
                     "e876f67a2a8886e8f36b136726c30fa29703022d",
@@ -39,7 +39,7 @@ public class TorrentTests
 
         responseOk.Interval.ShouldBe(60);
         responseOk
-            .Peers.Select((peer) => $"{peer.Ip.AsT1}:{peer.Port}")
+            .Peers.Select(static (peer) => $"{peer.Ip.AsT1}:{peer.Port}")
             .ShouldBeSubsetOf(
                 ["165.232.41.73:51556", "165.232.38.164:51493", "165.232.35.114:51476"]
             );

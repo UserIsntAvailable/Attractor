@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Numerics;
 using System.Security.Cryptography;
 using OneOf;
@@ -40,7 +41,7 @@ public record Torrent(Uri Announce, Info Info)
         Uri announce;
         try
         {
-            announce = new(announceString.AsString());
+            announce = new(announceString.ToString());
         }
         catch (UriFormatException ex)
         {
@@ -181,7 +182,7 @@ public record Torrent(Uri Announce, Info Info)
                             $"The 'info.files[{fileIndex}].path[{dirNameIndex}]' key should have a 'string' value."
                         );
                     }
-                    mappedPaths.Add(dirName.AsString());
+                    mappedPaths.Add(dirName.ToString());
                 }
 
                 mappedFiles.Add(new File(multiLength, mappedPaths));
@@ -198,7 +199,7 @@ public record Torrent(Uri Announce, Info Info)
                 : ParsingError.FormatException("The 'info.files' key should have a 'list' value.");
         }
 
-        return new Torrent(announce, new Info(name.AsString(), pieceLength, pieces, fileKind));
+        return new Torrent(announce, new Info(name.ToString(), pieceLength, pieces, fileKind));
     }
 }
 
@@ -234,16 +235,18 @@ public record Info(string Name, BigInteger PieceLength, List<BString> Pieces, Fi
     /// </summary>
     public byte[] Hash()
     {
+#pragma warning disable CA5350
         using var sha1Encoder = SHA1.Create();
+#pragma warning restore CA5350
         using var stream = new MemoryStream(256);
 
         // PERF(Unavailable): This is not as optimal as I would like...
 
         var dict = new SortedDictionary<BString, BValue>()
         {
-            { new BString("name"), new BValue(new BString(Name)) },
+            { new BString("name"), new BValue(Name) },
             { new BString("piece length"), PieceLength },
-            { new BString("pieces"), new BString([.. Pieces.SelectMany((x) => x.Bytes)]) },
+            { new BString("pieces"), new BString([.. Pieces.SelectMany(static (x) => x.Bytes)]) },
         };
 
         if (FileKind.TryPickT0(out var singleFile, out var multiFile))
@@ -257,26 +260,18 @@ public record Info(string Name, BigInteger PieceLength, List<BString> Pieces, Fi
                 new BList(
                     [
                         .. multiFile.Files.Select(
-                            (file) =>
-                                // TODO(Unavailable): `implicit` operators for
-                                // `BList` and `BDictionary`?
+                            static (file) =>
                                 new BValue(
-                                    new BDictionary(
-                                        new SortedDictionary<BString, BValue>()
+                                    new SortedDictionary<BString, BValue>()
+                                    {
+                                        { new BString("length"), file.Length },
                                         {
-                                            { new BString("length"), file.Length },
-                                            {
-                                                new BString("path"),
-                                                new BList(
-                                                    [
-                                                        .. file.Path.Select(
-                                                            (x) => new BValue(new BString(x))
-                                                        ),
-                                                    ]
-                                                )
-                                            },
-                                        }
-                                    )
+                                            new BString("path"),
+                                            new BList(
+                                                [.. file.Path.Select(static (x) => new BValue(x))]
+                                            )
+                                        },
+                                    }
                                 )
                         ),
                     ]
@@ -284,8 +279,13 @@ public record Info(string Name, BigInteger PieceLength, List<BString> Pieces, Fi
             );
         }
 
-        // FIXME(Unavailable): Propagate error.
-        new BValue(new BDictionary(dict)).Encode(stream);
+        if (new BValue(dict).Encode(stream).TryPickT1(out var error, out var _))
+        {
+            throw new UnreachableException(
+                "Impossible for MemoryStream to return an IOException",
+                error
+            );
+        }
         stream.Position = 0;
 
         return sha1Encoder.ComputeHash(stream);

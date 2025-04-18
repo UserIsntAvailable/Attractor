@@ -15,6 +15,18 @@ namespace Attractor;
 [GenerateOneOf]
 public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
 {
+    public BValue(string byteString)
+        : base(new BString(byteString)) { }
+
+    public BValue(byte[] bytes)
+        : base(new BString(bytes)) { }
+
+    public BValue(List<BValue> values)
+        : base(new BList(values)) { }
+
+    public BValue(SortedDictionary<BString, BValue> values)
+        : base(new BDictionary(values)) { }
+
     // TODO(Unavailable): async methods.
 
     // TODO(Unavailable): Simplify unclosed prefix reading to avoid
@@ -43,7 +55,7 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
         return Parse(reader, opts ?? new());
     }
 
-    public OneOf<IOException, None> Encode(Stream stream)
+    public OneOf<None, IOException> Encode(Stream stream)
     {
         // FIXME(Unavailable): try/catch and properly propagate recursive
         // exception errors.
@@ -52,7 +64,6 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
             {
                 stream.Write(
                     [
-                        // FIXME(Unavailable): FormatProvider
                         .. Encoding.UTF8.GetBytes(str.Bytes.Length.ToString()),
                         (byte)':',
                         .. str.Bytes,
@@ -62,7 +73,6 @@ public partial class BValue : OneOfBase<BString, BigInteger, BList, BDictionary>
             },
             (@int) =>
             {
-                // FIXME(Unavailable): FormatProvider
                 stream.Write([(byte)'i', .. Encoding.UTF8.GetBytes(@int.ToString()), (byte)'e']);
                 return new None();
             },
@@ -108,7 +118,7 @@ public partial class BValue
             'i' => ParseBigInteger(reader),
             'l' => ParseList(reader, opts),
             'd' => ParseDictionary(reader, opts),
-            _ => ParsingError.InvalidPrefixChar((char)value),
+            _ => ParsingError.InvalidPrefixChar(prefix),
         };
     }
 
@@ -143,7 +153,7 @@ public partial class BValue
             return ParsingError.EndOfStream;
         }
 
-        return new BValue(new BString(bytes));
+        return new BValue(bytes);
     }
 
     private static OneOf<BValue, ParsingError> ParseBigInteger(BinaryReader reader)
@@ -165,6 +175,7 @@ public partial class BValue
         {
             return ParsingError.UnclosedPrefix('i');
         }
+
         return chars switch
         {
             [] => ParsingError.EmptyInteger,
@@ -172,7 +183,7 @@ public partial class BValue
             // FIXME(Unavailable): Both `LeadingZeros` and `MinusZero` should
             // be returned with `-00`.
             ['-', '0', ..] => ParsingError.MinusZero,
-            _ => BigIntegerFromChars(chars).MapT0((x) => new BValue(x)),
+            _ => BigIntegerFromChars(chars).MapT0(static (x) => new BValue(x)),
         };
     }
 
@@ -207,7 +218,7 @@ public partial class BValue
             return ParsingError.UnclosedPrefix('l');
         }
 
-        return new BValue(new BList(result));
+        return new BValue(result);
     }
 
     private static OneOf<BValue, ParsingError> ParseDictionary(
@@ -253,7 +264,7 @@ public partial class BValue
             else
             {
                 return valueError.Equals(ParsingError.InvalidPrefixChar('e'))
-                    ? ParsingError.MissingDictionaryValues(keyString.AsString())
+                    ? ParsingError.MissingDictionaryValues(keyString.ToString())
                     : valueError;
             }
         }
@@ -263,7 +274,7 @@ public partial class BValue
             return ParsingError.UnclosedPrefix('d');
         }
 
-        return new BValue(new BDictionary(result));
+        return new BValue(result);
     }
 
     private static OneOf<BigInteger, ParsingError> BigIntegerFromChars(List<char> chars)
@@ -283,18 +294,14 @@ public partial class BValue
 
 public record BValueParseOptions(bool CheckDictionaryKeyOrder = true) { }
 
-// TODO(Unavailable): `IsUTF8` property hint (I think it can be useful for
-// BDictionary keys).
 public record BString(byte[] Bytes) : IComparable<BString>
 {
     public BString(string byteString)
         : this(Encoding.UTF8.GetBytes(byteString)) { }
 
-    public string AsString()
+    public override string ToString()
     {
-        // FIXME(Unavailable): What kind of errors this would return if this
-        // contains invalid `utf8`?
-        return Encoding.UTF8.GetString([.. Bytes]);
+        return Bytes is null ? "" : Encoding.UTF8.GetString([.. Bytes]);
     }
 
     public virtual bool Equals(BString? other)
