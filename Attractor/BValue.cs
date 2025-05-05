@@ -7,6 +7,7 @@ using System.Text;
 using OneOf;
 using OneOf.Types;
 
+// FIXME(Unavailable): I need to namespace this project's types better...
 namespace Attractor;
 
 /// <summary>

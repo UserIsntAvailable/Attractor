@@ -37,9 +37,9 @@ public class TorrentTests
         var response = await request.GetAsync(torrent.Announce);
         var responseOk = response.AsT0;
 
-        responseOk.Interval.ShouldBe(60);
+        responseOk.Interval.ShouldBe(60u);
         responseOk
-            .Peers.Select(static (peer) => $"{peer.Ip.AsT1}:{peer.Port}")
+            .Peers.Select(static (peer) => $"{peer.Address}:{peer.Port}")
             .ShouldBeSubsetOf(
                 ["165.232.41.73:51556", "165.232.38.164:51493", "165.232.35.114:51476"]
             );

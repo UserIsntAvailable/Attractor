@@ -126,7 +126,7 @@ public record class TrackerRequest(
                             )
                     )
                     .ToList();
-                return new TrackerResponseOk((nint)intervalInteger, peers);
+                return new TrackerResponseOk((uint)intervalInteger, peers);
             }
             else
             {
@@ -199,7 +199,7 @@ public partial class TrackerResponse : OneOfBase<TrackerResponseOk, TrackerRespo
 /// <param name="Peers">
 /// A list of <see cref="Peer"/>s where torrent pieces can be
 /// </param>
-public record TrackerResponseOk(nint Interval, List<Peer> Peers) { }
+public record TrackerResponseOk(uint Interval, List<Peer> Peers) { }
 
 /// An error response returned by the tracker.
 ///
